@@ -1,0 +1,182 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id            String          @id @default(uuid())
+  email         String          @unique
+  passwordHash  String
+  role          String          // "SUPER_ADMIN", "HOSPITAL_ADMIN", "BLOOD_BANK_STAFF"
+  name          String
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  staffProfile  HospitalStaff?
+  auditLogs     AuditLog[]
+}
+
+model Hospital {
+  id                 String          @id @default(uuid())
+  name               String
+  registrationNumber String          @unique
+  licenseNumber      String
+  address            String
+  city               String
+  state              String
+  contactNumber      String
+  emergencyContact   String
+  email              String          @unique
+  latitude           Float
+  longitude          Float
+  verificationStatus String          // "PENDING", "APPROVED", "REJECTED", "SUSPENDED"
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  staff              HospitalStaff[]
+  bloodUnits         BloodUnit[]
+  donors             Donor[]
+  outgoingRequests   BloodRequest[]  @relation("RequestingHospital")
+  incomingRequests   BloodRequest[]  @relation("SupplyingHospital")
+  notifications      Notification[]
+  reports            Report[]
+  settings           Setting[]
+}
+
+model HospitalStaff {
+  id         String   @id @default(uuid())
+  userId     String   @unique
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hospitalId String
+  hospital   Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  role       String   // "ADMIN", "STAFF"
+  createdAt  DateTime @default(now())
+}
+
+model BloodUnit {
+  id                 String    @id @default(uuid())
+  bloodUnitId        String    @unique // Readable ID: e.g. BAG-A-001 or QR contents
+  bloodGroup         String    // "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"
+  quantity           Float     // volume (normally 1 unit)
+  collectionDate     DateTime
+  expiryDate         DateTime
+  donorId            String?
+  donor              Donor?    @relation(fields: [donorId], references: [id], onDelete: SetNull)
+  storageTemperature Float     // e.g. 4.0 Celsius
+  hospitalId         String
+  hospital           Hospital  @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  status             String    // "AVAILABLE", "RESERVED", "USED", "EXPIRED", "IN_TRANSIT", "TRANSFERRED"
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  transfers          TransferBloodUnit[]
+}
+
+model Donor {
+  id                String      @id @default(uuid())
+  name              String
+  age               Int
+  gender            String
+  bloodGroup        String
+  weight            Float
+  contact           String
+  medicalHistory    String?
+  lastDonation      DateTime?
+  donationCount     Int         @default(0)
+  eligibilityStatus String      // "ELIGIBLE", "INELIGIBLE"
+  hospitalId        String
+  hospital          Hospital    @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  bloodUnits        BloodUnit[]
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+}
+
+model BloodRequest {
+  id                   String     @id @default(uuid())
+  bloodGroup           String
+  unitsRequired        Int
+  priority             String     // "CRITICAL", "EMERGENCY", "HIGH", "NORMAL", "LOW"
+  requestingHospitalId String
+  requestingHospital   Hospital   @relation("RequestingHospital", fields: [requestingHospitalId], references: [id], onDelete: Cascade)
+  supplyingHospitalId  String?
+  supplyingHospital    Hospital?  @relation("SupplyingHospital", fields: [supplyingHospitalId], references: [id], onDelete: SetNull)
+  status               String     // "PENDING", "APPROVED", "REJECTED", "DISPATCHED", "IN_TRANSIT", "DELIVERED", "COMPLETED", "CANCELLED"
+  patientAge           Int
+  requiredBefore       DateTime
+  reason               String
+  contactPerson        String
+  contactNumber        String
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
+  transfers            Transfer[]
+}
+
+model Transfer {
+  id               String              @id @default(uuid())
+  requestId        String
+  request          BloodRequest        @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  qrCodeUrl        String?
+  status           String              // "PENDING", "DISPATCHED", "IN_TRANSIT", "DELIVERED", "COMPLETED"
+  dispatchedAt     DateTime?
+  deliveredAt      DateTime?
+  verificationCode String
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  bloodUnits       TransferBloodUnit[]
+}
+
+// Junction table for transfers and blood units
+model TransferBloodUnit {
+  id          String    @id @default(uuid())
+  transferId  String
+  transfer    Transfer  @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  bloodUnitId String
+  bloodUnit   BloodUnit @relation(fields: [bloodUnitId], references: [id], onDelete: Cascade)
+
+  @@unique([transferId, bloodUnitId])
+}
+
+model Notification {
+  id         String    @id @default(uuid())
+  userId     String?
+  hospitalId String?
+  hospital   Hospital? @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  title      String
+  message    String
+  type       String    // "EMERGENCY", "STOCK_ALERT", "REQUEST_UPDATE", "SYSTEM"
+  read       Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  details   String
+  ipAddress String?
+  createdAt DateTime @default(now())
+}
+
+model Report {
+  id         String   @id @default(uuid())
+  hospitalId String
+  hospital   Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  title      String
+  type       String   // "DAILY", "WEEKLY", "MONTHLY", "INVENTORY", "TRANSFERS"
+  filePath   String
+  createdAt  DateTime @default(now())
+}
+
+model Setting {
+  id         String   @id @default(uuid())
+  hospitalId String
+  hospital   Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  key        String
+  value      String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([hospitalId, key])
+}

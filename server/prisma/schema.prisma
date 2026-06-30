@@ -1,0 +1,296 @@
+// prisma/schema.prisma
+// HemoExchange AI — Complete Database Schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum Role {
+  SUPER_ADMIN
+  HOSPITAL_ADMIN
+  BLOOD_BANK_STAFF
+}
+
+enum HospitalStatus {
+  PENDING
+  APPROVED
+  SUSPENDED
+  REJECTED
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum BloodGroup {
+  A_POSITIVE
+  A_NEGATIVE
+  B_POSITIVE
+  B_NEGATIVE
+  AB_POSITIVE
+  AB_NEGATIVE
+  O_POSITIVE
+  O_NEGATIVE
+}
+
+enum BloodUnitStatus {
+  AVAILABLE
+  RESERVED
+  TRANSFERRED
+  USED
+  EXPIRED
+  DISCARDED
+}
+
+enum RequestPriority {
+  NORMAL
+  MEDIUM
+  HIGH
+  EMERGENCY
+  CRITICAL
+}
+
+enum RequestStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  DISPATCHED
+  DELIVERED
+  CANCELLED
+}
+
+enum TransferStatus {
+  INITIATED
+  IN_TRANSIT
+  DELIVERED
+  FAILED
+}
+
+// ─── Models ───────────────────────────────────────────────────────────────────
+
+model User {
+  id         String     @id @default(uuid())
+  supabaseId String     @unique
+  email      String     @unique
+  name       String
+  role       Role
+  hospitalId String?
+  hospital   Hospital?  @relation(fields: [hospitalId], references: [id])
+  isActive   Boolean    @default(true) // Deprecated, use status
+  status     UserStatus @default(ACTIVE)
+  department String?
+  avatar     String?
+  lastLogin  DateTime?
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  deletedAt  DateTime?
+
+  auditLogs     AuditLog[]
+  notifications Notification[]
+
+  @@index([supabaseId])
+  @@index([hospitalId])
+}
+
+model Hospital {
+  id                 String         @id @default(uuid())
+  name               String
+  registrationNumber String         @unique
+  type               String
+  address            String
+  city               String
+  state              String
+  pincode            String
+  phone              String
+  email              String         @unique
+  website            String?
+  latitude           Float?
+  longitude          Float?
+  status             HospitalStatus @default(PENDING)
+  verifiedAt         DateTime?
+  licenseDocument    String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  deletedAt          DateTime?
+
+  users            User[]
+  bloodUnits       BloodUnit[]
+  outgoingRequests BloodRequest[] @relation("RequestingHospital")
+  incomingRequests BloodRequest[] @relation("RespondingHospital")
+  transfers        Transfer[]
+  auditLogs        AuditLog[]
+
+  @@index([city])
+  @@index([status])
+}
+
+model BloodUnit {
+  id                 String          @id @default(uuid())
+  unitCode           String          @unique
+  bloodGroup         BloodGroup
+  quantityMl         Int             @default(450)
+  collectionDate     DateTime
+  expiryDate         DateTime
+  storageTemperature Float           @default(4.0)
+  status             BloodUnitStatus @default(AVAILABLE)
+  hospitalId         String
+  hospital           Hospital        @relation(fields: [hospitalId], references: [id])
+  donorId            String?
+  donor              Donor?          @relation(fields: [donorId], references: [id])
+  qrCodeUrl          String?
+  barcodeUrl         String?
+  notes              String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  deletedAt          DateTime?
+
+  transferItems TransferItem[]
+  inventoryLogs InventoryLog[]
+
+  @@index([bloodGroup, status])
+  @@index([hospitalId])
+  @@index([expiryDate])
+}
+
+model Donor {
+  id         String     @id @default(uuid())
+  name       String
+  bloodGroup BloodGroup
+  phone      String?
+  email      String?
+  hospitalId String
+  createdAt  DateTime   @default(now())
+  deletedAt  DateTime?
+
+  bloodUnits BloodUnit[]
+}
+
+model BloodRequest {
+  id                   String          @id @default(uuid())
+  requestCode          String          @unique
+  bloodGroup           BloodGroup
+  quantityMl           Int
+  priority             RequestPriority @default(NORMAL)
+  status               RequestStatus   @default(PENDING)
+  reason               String
+  patientName          String?
+  requestingHospitalId String
+  requestingHospital   Hospital        @relation("RequestingHospital", fields: [requestingHospitalId], references: [id])
+  respondingHospitalId String?
+  respondingHospital   Hospital?       @relation("RespondingHospital", fields: [respondingHospitalId], references: [id])
+  requiredBy           DateTime
+  acceptedAt           DateTime?
+  completedAt          DateTime?
+  notes                String?
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+  deletedAt            DateTime?
+
+  transfer      Transfer?
+  notifications Notification[]
+
+  @@index([status, priority])
+  @@index([requestingHospitalId])
+  @@index([bloodGroup])
+}
+
+model Transfer {
+  id           String         @id @default(uuid())
+  transferCode String         @unique
+  requestId    String         @unique
+  request      BloodRequest   @relation(fields: [requestId], references: [id])
+  status       TransferStatus @default(INITIATED)
+  dispatchedAt DateTime?
+  deliveredAt  DateTime?
+  hospitalId   String
+  hospital     Hospital       @relation(fields: [hospitalId], references: [id])
+  notes        String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  items TransferItem[]
+}
+
+model TransferItem {
+  id          String    @id @default(uuid())
+  transferId  String
+  transfer    Transfer  @relation(fields: [transferId], references: [id])
+  bloodUnitId String
+  bloodUnit   BloodUnit @relation(fields: [bloodUnitId], references: [id])
+}
+
+model Notification {
+  id        String        @id @default(uuid())
+  userId    String
+  user      User          @relation(fields: [userId], references: [id])
+  title     String
+  message   String
+  type      String
+  isRead    Boolean       @default(false)
+  requestId String?
+  request   BloodRequest? @relation(fields: [requestId], references: [id])
+  createdAt DateTime      @default(now())
+
+  @@index([userId, isRead])
+}
+
+model AuditLog {
+  id         String    @id @default(uuid())
+  userId     String?
+  user       User?     @relation(fields: [userId], references: [id])
+  hospitalId String?
+  hospital   Hospital? @relation(fields: [hospitalId], references: [id])
+  action     String
+  entity     String
+  entityId   String
+  oldData    Json?
+  newData    Json?
+  ipAddress  String?
+  userAgent  String? // Browser
+  requestId  String? // HTTP Request ID
+  result     String? // Success, Failed, etc
+  createdAt  DateTime  @default(now())
+
+  @@index([entity, entityId])
+  @@index([userId])
+  @@index([hospitalId])
+}
+
+model InventoryLog {
+  id          String           @id @default(uuid())
+  bloodUnitId String
+  bloodUnit   BloodUnit        @relation(fields: [bloodUnitId], references: [id])
+  action      String
+  fromStatus  BloodUnitStatus?
+  toStatus    BloodUnitStatus
+  notes       String?
+  createdAt   DateTime         @default(now())
+}
+
+model AIPrediction {
+  id         String      @id @default(uuid())
+  hospitalId String
+  bloodGroup BloodGroup?
+  type       String
+  prediction Json
+  confidence Float?
+  validUntil DateTime?
+  createdAt  DateTime    @default(now())
+
+  @@index([hospitalId])
+}
+
+model SystemSetting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt
+}
